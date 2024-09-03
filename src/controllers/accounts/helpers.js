@@ -132,13 +132,7 @@ function calculateAge(birthday) {
         0,
         birthday ? Math.floor((new Date().getTime() - new Date(birthday).getTime()) / 31536000000) : 0
     );
-}
-
-function canAllowProfilePicture(userData) {
-    return !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:profile-picture'];
-}
-
-function canAllowCoverPicture(userData) {
+}function canAllowCoverPicture(userData) {
     return !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:cover-picture'];
 }
 
