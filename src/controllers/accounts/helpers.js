@@ -132,7 +132,13 @@ function calculateAge(birthday) {
         0,
         birthday ? Math.floor((new Date().getTime() - new Date(birthday).getTime()) / 31536000000) : 0
     );
-}function canAllowCoverPicture(userData) {
+}
+
+function canAllowProfilePicture(userData) {
+    return !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:profile-picture'];
+}
+
+function canAllowCoverPicture(userData) {
     return !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:cover-picture'];
 }
 
@@ -158,7 +164,7 @@ function getProfileLinkOptions(isSelf, isModerator, isGlobalModerator, isAdmin, 
 
 function getCoverUrl(userData) {
     if (userData['cover:url']) {
-        return userData['cover:url'].startsWith('http') ? userData['cover:url'] : (nconf.get('relative_path') + userData['cover:url']);
+        return userData['cover:url'].startsWith('http') ? userData['cover:url'] : (nconf.get('relative_path') userData['cover:url']);
     } else {
         return require('../../coverPhoto').getDefaultProfileCover(userData.uid);
     }
