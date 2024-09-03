@@ -164,7 +164,7 @@ function getProfileLinkOptions(isSelf, isModerator, isGlobalModerator, isAdmin, 
 
 function getCoverUrl(userData) {
     if (userData['cover:url']) {
-        return userData['cover:url'].startsWith('http') ? userData['cover:url'] : (nconf.get('relative_path') userData['cover:url']);
+        return userData['cover:url'].startsWith('http') ? userData['cover:url'] : (nconf.get('relative_path') + userData['cover:url']);
     } else {
         return require('../../coverPhoto').getDefaultProfileCover(userData.uid);
     }
