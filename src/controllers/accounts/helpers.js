@@ -17,7 +17,45 @@ const categories = require('../../categories');
 const relative_path = nconf.get('relative_path');
 
 const helpers = module.exports;
+async function getUserDataByUserSlug(userslug, callerUID, query = {}) {
+	const uid = await user.getUidByUserslug(userslug);
+	if (!uid) {
+		return null;
+	}
 
+	const results = await getAllData(uid, callerUID);
+	if (!results.userData) {
+		throw new Error('[[error:invalid-uid]]');
+	}
+
+	await parseAboutMe(results.userData);
+
+	let userData = await prepareUserData(results, callerUID);
+	userData = await finalizeUserData(userData, results, callerUID);
+
+	const hookData = await plugins.hooks.fire('filter:helpers.getUserDataByUserSlug', {
+		userData: userData,
+		callerUID: callerUID,
+		query: query,
+	});
+	return hookData.userData;
+}
+
+async function displayUserInfo(userslug, callerUID) {
+    try {
+        const userData = await getUserDataByUserSlug(userslug, callerUID);
+        if (userData) {
+            console.log('User Data:', userData);
+        } else {
+            console.log('User not found');
+        }
+    } catch (error) {
+        console.error('Error fetching user data:', error);
+    }
+}
+
+// Example usage
+displayUserInfo('example-slug', 'caller-uid');
 
 async function prepareUserData(results, callerUID) {
 	let { userData } = results;
