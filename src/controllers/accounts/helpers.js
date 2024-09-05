@@ -45,6 +45,9 @@ helpers.getUserDataByUserSlug = async function (userslug, callerUID, query = {})
 	setUserProfileDetails(userData);
 	setUserCoverPhoto(userData);
 
+	// Calculate and set age
+	userData.age = calculateAge(userData.birthday);
+
 	await getCounts(userData, callerUID);
 
 	const hookData = await plugins.hooks.fire('filter:helpers.getUserDataByUserSlug', {
@@ -54,6 +57,10 @@ helpers.getUserDataByUserSlug = async function (userslug, callerUID, query = {})
 	});
 	return hookData.userData;
 };
+
+function calculateAge(birthday) {
+	return Math.max(0, birthday ? Math.floor((new Date().getTime() - new Date(birthday).getTime()) / 31536000000) : 0);
+}
 
 function setEmailVisibility(userData, userSettings) {
 	userData.emailHidden = !userSettings.showemail;
