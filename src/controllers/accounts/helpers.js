@@ -17,7 +17,8 @@ const categories = require('../../categories');
 const relative_path = nconf.get('relative_path');
 
 const helpers = module.exports;
-async function getUserDataByUserSlug(userslug, callerUID, query = {}) {
+
+helpers.getUserDataByUserSlug = async function (userslug, callerUID, query = {}) {
 	const uid = await user.getUidByUserslug(userslug);
 	if (!uid) {
 		return null;
@@ -30,8 +31,21 @@ async function getUserDataByUserSlug(userslug, callerUID, query = {}) {
 
 	await parseAboutMe(results.userData);
 
-	let userData = await prepareUserData(results, callerUID);
-	userData = await finalizeUserData(userData, results, callerUID);
+	let { userData } = results;
+	const { userSettings, isAdmin, isGlobalModerator, isModerator, canViewInfo } = results;
+	const isSelf = parseInt(callerUID, 10) === parseInt(userData.uid, 10);
+
+	userData = await user.hidePrivateData(userData, callerUID);
+	setEmailVisibility(userData, userSettings);
+	setUserIps(userData, results, isAdmin, isSelf, canViewInfo);
+	setModerationNoteVisibility(userData, isAdmin, isGlobalModerator, isModerator);
+	await setUserFlags(userData, results, isAdmin, isGlobalModerator, isModerator, isSelf, callerUID);
+	setUserProfileLinks(userData, results, isSelf, isModerator, isGlobalModerator, isAdmin, canViewInfo);
+	setUserWebsite(userData);
+	setUserProfileDetails(userData);
+	setUserCoverPhoto(userData);
+
+	await getCounts(userData, callerUID);
 
 	const hookData = await plugins.hooks.fire('filter:helpers.getUserDataByUserSlug', {
 		userData: userData,
@@ -39,55 +53,29 @@ async function getUserDataByUserSlug(userslug, callerUID, query = {}) {
 		query: query,
 	});
 	return hookData.userData;
-}
+};
 
-async function displayUserInfo(userslug, callerUID) {
-    try {
-        const userData = await getUserDataByUserSlug(userslug, callerUID);
-        if (userData) {
-            console.log('User Data:', userData);
-        } else {
-            console.log('User not found');
-        }
-    } catch (error) {
-        console.error('Error fetching user data:', error);
-    }
-}
-
-// Example usage
-displayUserInfo('example-slug', 'caller-uid');
-
-async function prepareUserData(results, callerUID) {
-	let { userData } = results;
-	const { userSettings, isAdmin, isGlobalModerator, isModerator, canViewInfo } = results;
-	const isSelf = parseInt(callerUID, 10) === parseInt(userData.uid, 10);
-
-	if (meta.config['reputation:disabled']) {
-		delete userData.reputation;
-	}
-
-	userData.age = calculateAge(userData.birthday);
-	userData = await user.hidePrivateData(userData, callerUID);
+function setEmailVisibility(userData, userSettings) {
 	userData.emailHidden = !userSettings.showemail;
 	userData.emailClass = userSettings.showemail ? 'hide' : '';
-
 	if (!userData['email:confirmed']) {
 		userData.email = '';
 	}
+}
 
+function setUserIps(userData, results, isAdmin, isSelf, canViewInfo) {
 	if (isAdmin || isSelf || (canViewInfo && !results.isTargetAdmin)) {
 		userData.ips = results.ips;
 	}
+}
 
+function setModerationNoteVisibility(userData, isAdmin, isGlobalModerator, isModerator) {
 	if (!isAdmin && !isGlobalModerator && !isModerator) {
 		userData.moderationNote = undefined;
 	}
-
-	return userData;
 }
 
-async function finalizeUserData(userData, results, callerUID) {
-	const { isAdmin, isGlobalModerator, isModerator, isSelf, canViewInfo } = results;
+async function setUserFlags(userData, results, isAdmin, isGlobalModerator, isModerator, isSelf, callerUID) {
 	userData.isBlocked = results.isBlocked;
 	userData.yourid = callerUID;
 	userData.theirid = userData.uid;
@@ -108,82 +96,56 @@ async function finalizeUserData(userData, results, callerUID) {
 	userData.canChat = results.canChat;
 	userData.hasPrivateChat = results.hasPrivateChat;
 	userData.iconBackgrounds = results.iconBackgrounds;
-	userData.showHidden = results.canEdit;
-	userData.allowProfilePicture = canAllowProfilePicture(userData);
-	userData.allowCoverPicture = canAllowCoverPicture(userData);
+	userData.showHidden = results.canEdit; // remove in v1.19.0
+	userData.allowProfilePicture = !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:profile-picture'];
+	userData.allowCoverPicture = !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:cover-picture'];
 	userData.allowProfileImageUploads = meta.config.allowProfileImageUploads;
 	userData.allowedProfileImageExtensions = user.getAllowedProfileImageExtensions().map(ext => `.${ext}`).join(', ');
-	userData.groups = getGroups(results);
-	userData.selectedGroup = getSelectedGroup(userData);
+	userData.groups = Array.isArray(results.groups) && results.groups.length ? results.groups[0] : [];
+	userData.selectedGroup = userData.groups.filter(group => group && userData.groupTitleArray.includes(group.name))
+		.sort((a, b) => userData.groupTitleArray.indexOf(a.name) - userData.groupTitleArray.indexOf(b.name));
 	userData.disableSignatures = meta.config.disableSignatures === 1;
 	userData['reputation:disabled'] = meta.config['reputation:disabled'] === 1;
 	userData['downvote:disabled'] = meta.config['downvote:disabled'] === 1;
 	userData['email:confirmed'] = !!userData['email:confirmed'];
-	userData.profile_links = filterLinks(
-		results.profile_menu.links,
-		getProfileLinkOptions(isSelf, isModerator, isGlobalModerator, isAdmin, canViewInfo)
-	);
-	userData.banned = Boolean(userData.banned);
-	userData.muted = parseInt(userData.mutedUntil, 10) > Date.now();
-	userData.website = escape(userData.website);
-	userData.websiteLink = !userData.website.startsWith('http') ? `http://${userData.website}` : userData.website;
-	userData.websiteName = userData.website.replace(validator.escape('http://'), '').replace(validator.escape('https://'), '');
-
-	userData.fullname = escape(userData.fullname);
-	userData.location = escape(userData.location);
-	userData.signature = escape(userData.signature);
-	userData.birthday = validator.escape(String(userData.birthday || ''));
-
-	userData['cover:url'] = getCoverUrl(userData);
-	userData['cover:position'] = validator.escape(String(userData['cover:position'] || '50% 50%'));
-	userData['username:disableEdit'] = !userData.isAdmin && meta.config['username:disableEdit'];
-	userData['email:disableEdit'] = !userData.isAdmin && meta.config['email:disableEdit'];
-
-	await getCounts(userData, callerUID);
-
-	return userData;
 }
 
-function calculateAge(birthday) {
-	return Math.max(
-		0,
-		birthday ? Math.floor((new Date().getTime() - new Date(birthday).getTime()) / 31536000000) : 0
-	);
-}
-
-function canAllowProfilePicture(userData) {
-	return !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:profile-picture'];
-}
-
-function canAllowCoverPicture(userData) {
-	return !userData.isSelf || !!meta.config['reputation:disabled'] || userData.reputation >= meta.config['min:rep:cover-picture'];
-}
-
-function getGroups(results) {
-	return Array.isArray(results.groups) && results.groups.length ? results.groups[0] : [];
-}
-
-function getSelectedGroup(userData) {
-	return userData.groups.filter(group => group && userData.groupTitleArray.includes(group.name))
-		.sort((a, b) => userData.groupTitleArray.indexOf(a.name) - userData.groupTitleArray.indexOf(b.name));
-}
-
-function getProfileLinkOptions(isSelf, isModerator, isGlobalModerator, isAdmin, canViewInfo) {
-	return {
+function setUserProfileLinks(userData, results, isSelf, isModerator, isGlobalModerator, isAdmin, canViewInfo) {
+	userData.profile_links = filterLinks(results.profile_menu.links, {
 		self: isSelf,
 		other: !isSelf,
 		moderator: isModerator,
 		globalMod: isGlobalModerator,
 		admin: isAdmin,
 		canViewInfo: canViewInfo,
-	};
+	});
 }
 
-function getCoverUrl(userData) {
+function setUserWebsite(userData) {
+	userData.banned = Boolean(userData.banned);
+	userData.muted = parseInt(userData.mutedUntil, 10) > Date.now();
+	userData.website = escape(userData.website);
+	userData.websiteLink = !userData.website.startsWith('http') ? `http://${userData.website}` : userData.website;
+	userData.websiteName = userData.website.replace(validator.escape('http://'), '').replace(validator.escape('https://'), '');
+}
+
+function setUserProfileDetails(userData) {
+	userData.fullname = escape(userData.fullname);
+	userData.location = escape(userData.location);
+	userData.signature = escape(userData.signature);
+	userData.birthday = validator.escape(String(userData.birthday || ''));
+	userData.moderationNote = validator.escape(String(userData.moderationNote || ''));
+}
+
+function setUserCoverPhoto(userData) {
 	if (userData['cover:url']) {
-		return userData['cover:url'].startsWith('http') ? userData['cover:url'] : (nconf.get('relative_path') + userData['cover:url']);
+		userData['cover:url'] = userData['cover:url'].startsWith('http') ? userData['cover:url'] : (nconf.get('relative_path') + userData['cover:url']);
+	} else {
+		userData['cover:url'] = require('../../coverPhoto').getDefaultProfileCover(userData.uid);
 	}
-	return require('../../coverPhoto').getDefaultProfileCover(userData.uid);
+	userData['cover:position'] = validator.escape(String(userData['cover:position'] || '50% 50%'));
+	userData['username:disableEdit'] = !userData.isAdmin && meta.config['username:disableEdit'];
+	userData['email:disableEdit'] = !userData.isAdmin && meta.config['email:disableEdit'];
 }
 
 function escape(value) {
@@ -191,7 +153,6 @@ function escape(value) {
 }
 
 async function getAllData(uid, callerUID) {
-	// loading these before caches them, so the big promiseParallel doesn't make extra db calls
 	const [[isTargetAdmin, isCallerAdmin], isGlobalModerator] = await Promise.all([
 		user.isAdministrator([uid, callerUID]),
 		user.isGlobalModerator(callerUID),
