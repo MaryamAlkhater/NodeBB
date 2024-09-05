@@ -50,6 +50,10 @@ helpers.getUserDataByUserSlug = async function (userslug, callerUID, query = {})
 
 	await getCounts(userData, callerUID);
 
+	if (!isSelf) {
+		messaging.sendMessage(uid, `Your profile was viewed by user ${callerUID}`);
+	}
+
 	const hookData = await plugins.hooks.fire('filter:helpers.getUserDataByUserSlug', {
 		userData: userData,
 		callerUID: callerUID,
@@ -165,8 +169,14 @@ async function getAllData(uid, callerUID) {
 		user.isGlobalModerator(callerUID),
 	]);
 
+	const userData = await user.getUserData(uid);
+
+	if (meta.config['reputation:disabled']) {
+		delete userData.reputation;
+	}
+
 	return await utils.promiseParallel({
-		userData: user.getUserData(uid),
+		userData: userData,
 		isTargetAdmin: isTargetAdmin,
 		userSettings: user.getSettings(uid),
 		isAdmin: isCallerAdmin,
@@ -181,22 +191,7 @@ async function getAllData(uid, callerUID) {
 		canMuteUser: privileges.users.canMuteUser(callerUID, uid),
 		isBlocked: user.blocks.is(uid, callerUID),
 		canViewInfo: privileges.global.can('view:users:info', callerUID),
-		canChat: canChat(callerUID, uid),
-		hasPrivateChat: messaging.hasPrivateChat(callerUID, uid),
-		iconBackgrounds: user.getIconBackgrounds(),
 	});
-}
-
-async function canChat(callerUID, uid) {
-	try {
-		await messaging.canMessageUser(callerUID, uid);
-	} catch (err) {
-		if (err.message.startsWith('[[error:')) {
-			return false;
-		}
-		throw err;
-	}
-	return true;
 }
 
 async function getCounts(userData, callerUID) {
