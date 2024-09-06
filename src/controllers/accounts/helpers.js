@@ -18,6 +18,7 @@ const relative_path = nconf.get('relative_path');
 
 const helpers = module.exports;
 
+console.log('Maryam : Refactored code executed');
 helpers.getUserDataByUserSlug = async function (userslug, callerUID, query = {}) {
 	const uid = await user.getUidByUserslug(userslug);
 	if (!uid) {
